@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "powerworld-tp-tools"
+version = "0.0.1"
+description = "PowerWorld transmission planning helper functions"
+readme = "README.md"
+requires-python = ">=3.10"
+
+authors = [
+    {name = "Joshua Xia"}
+]

@@ -1,6 +1,6 @@
 # PowerWorld Transmission Planning Tools
 
-PowerWorld Transmission Planning Tools is a Python package that simplifies automation of common transmission planning workflows in PowerWorld Simulator through SimAuto or the ESA (Easy Sim Auto) interface.
+PowerWorld Transmission Planning Tools is a Python package that simplifies automation of common transmission planning tasks in PowerWorld Simulator through SimAuto or the ESA (Easy Sim Auto) interface.
 
 The package provides high-level functions for tasks frequently encountered in transmission planning studies, allowing users to focus on analysis rather than low-level SimAuto/ESA coding.
 

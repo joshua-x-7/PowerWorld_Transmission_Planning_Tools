@@ -3,8 +3,8 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "powerworld-tp-tools"
-version = "0.0.1"
+name = "powerworld-tplan-tools"
+version = "0.0.2"
 description = "PowerWorld transmission planning helper functions"
 readme = "README.md"
 requires-python = ">=3.10"

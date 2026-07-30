@@ -1,3 +1,4 @@
+from math import pi, sin, cos, atan2, sqrt
 
 # VARIABLES
 _ctg_element_branch_fields = ["BusNum", "BusNum:1", "LineCircuit", "BusName", "BusName:1", "LineXfmr"]
@@ -270,6 +271,97 @@ def get_total_ctg_overload(saw, use_distributed = "NO"):
         total_combined_overload = 0
 
     return total_combined_overload
+
+# Function to calculate straight-line geographic distance given two longitudes and latitudes in miles
+def calc_haversine_distance(long1, lat1, long2, lat2, earth_radius_km = 6371):
+    """
+    Calculate the great-circle geographic distance between two
+    locations using the Haversine formula.
+
+    This function computes the great-circle distance between two points
+    specified by longitude and latitude coordinates. The result is
+    returned in miles.
+
+    The Haversine formula accounts for the Earth's curvature and is
+    therefore more accurate than applying Euclidean distance directly
+    to longitude and latitude coordinates. Longitude and latitude are
+    angular coordinates on the surface of a sphere, not Cartesian
+    coordinates in a flat plane. As a result, the physical distance
+    represented by one degree of longitude varies with latitude, and
+    straight-line Euclidean calculations on geographic coordinates can
+    produce significant errors, especially over longer distances.
+
+    This function is intended to help estimate the length of candidate
+    transmission lines between two buses. In PowerWorld, bus and substation coordaintes are the same.
+    Users can provide the longitude and latitude coordinates of
+    two substations to estimate the straight-line length of a candidate transmission line between them.
+    Real transmission lines typically do not follow a perfectly straight path due to terrain,
+    right-of-way constraints, environmental considerations, and other
+    engineering requirements, so actual line lengths may be longer than
+    the calculated distance.
+
+    Parameters
+    ----------
+    long1 : float
+        Longitude of the first location in decimal degrees.
+
+    lat1 : float
+        Latitude of the first location in decimal degrees.
+
+    long2 : float
+        Longitude of the second location in decimal degrees.
+
+    lat2 : float
+        Latitude of the second location in decimal degrees.
+
+    earth_radius_km : float, default=6371
+        Radius of the Earth in kilometers. The default value of 6371 km
+        corresponds to the Earth's mean radius.
+
+    Returns
+    -------
+    float
+        Great-circle distance between the two locations in miles.
+
+    Notes
+    -----
+    - Input coordinates must be provided in decimal degrees.
+    - Internally, coordinates are converted from degrees to radians.
+    - The returned distance represents the shortest path along the
+      Earth's surface between the two locations.
+    - Actual transmission line lengths are often greater than the
+      calculated distance due to routing constraints.
+
+    Examples
+    --------
+    Calculate the approximate straight-line distance between two
+    substations:
+
+    >>> distance = calc_haversine_distance(
+    ...     -96.3344, 30.6279,
+    ...     -95.3698, 29.7604
+    ... )
+    >>> print(distance)
+    83.15
+
+    Estimate the length of a candidate transmission line:
+
+    >>> candidate_length = calc_haversine_distance(
+    ...     bus_substation_1_longitude,
+    ...     bus_substation_1_latitude,
+    ...     bus_substation_2_longitude,
+    ...     bus_substation_2_latitude
+    ... )
+    """
+    long1_rad, lat1_rad = (long1 * pi) / 180, (lat1 * pi) / 180
+    long2_rad, lat2_rad = (long2 * pi) / 180, (lat2 * pi) / 180
+    dLong = long2_rad - long1_rad
+    dLat = lat2_rad - lat1_rad
+    a = pow(sin(.5 * dLat), 2) + cos(lat1_rad) * cos(lat2_rad) * pow(sin(.5 * dLong), 2)
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    distance_km = earth_radius_km * c
+    return distance_km / 1.609
+
 
 
 

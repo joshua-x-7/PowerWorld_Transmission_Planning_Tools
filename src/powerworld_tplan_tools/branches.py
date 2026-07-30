@@ -10,7 +10,7 @@ BRANCH_KEY_AND_REQUIRED_FIELDS = ["BusNum", "BusNum:1", "LineCircuit", "LineR", 
 
 # FUNCTIONS
 # Function to add a branch to the case
-def add_branch_to_case(saw, branch_fields_list, branch_value_list):
+def add_branch_to_case(saw, branch_value_list, branch_fields_list = BRANCH_KEY_AND_REQUIRED_FIELDS):
     """
     Add a branch to a PowerWorld case.
 
@@ -19,18 +19,24 @@ def add_branch_to_case(saw, branch_fields_list, branch_value_list):
     branch field names are automatically converted into the format
     required by PowerWorld script commands.
 
+    By default, the function assumes that the values in
+    ``branch_value_list`` correspond to the PowerWorld key and
+    required fields contained in ``BRANCH_KEY_AND_REQUIRED_FIELDS``.
+    Users may provide a custom field list when additional branch
+    attributes need to be specified.
+
     Parameters
     ----------
     saw : SAW
         SimAutoWrapper object connected to a PowerWorld case.
 
-    branch_fields_list : list[str]
-        List of branch field names corresponding to the values in
-        ``branch_value_list``.
+    branch_value_list : list
+        Values corresponding to the fields specified in
+        ``branch_fields_list``.
 
-        At a minimum, this list must contain all PowerWorld key and
-        required fields for a Branch object. These fields are provided
-        by the package constant ``BRANCH_KEY_AND_REQUIRED_FIELDS``:
+        When using the default field list
+        ``BRANCH_KEY_AND_REQUIRED_FIELDS``, values must be provided
+        in the following order:
 
         - ``BusNum``: From-bus number.
         - ``BusNum:1``: To-bus number.
@@ -41,19 +47,28 @@ def add_branch_to_case(saw, branch_fields_list, branch_value_list):
         - ``LineAMVA:1``: Limit MVA B.
         - ``LineAMVA:2``: Limit MVA C.
 
-        Additional branch fields may also be included as needed.
-        Available branch fields can be viewed in PowerWorld by using
-        Window → Export Display Object Fields and locating the Branch
-        object field definitions.
+    branch_fields_list : list[str], optional
+        List of branch field names corresponding to the values in
+        ``branch_value_list``.
 
-    branch_value_list : list
-        Values corresponding to the fields in
-        ``branch_fields_list``. The order of values must exactly
-        match the order of the specified fields.
+        Defaults to ``BRANCH_KEY_AND_REQUIRED_FIELDS``, which
+        contains the minimum PowerWorld key and required fields
+        needed to create a Branch object. This argument may be supplied
+        positionally or as a keyword argument.
+
+        Additional branch fields may be included as needed. Available
+        branch fields can be viewed in PowerWorld by selecting
+        Window → Export Display Object Fields and locating the
+        Branch object field definitions.
 
     Returns
     -------
     None
+
+    Raises
+    ------
+    ValueError
+        If the number of fields does not match the number of values.
 
     Notes
     -----
@@ -66,7 +81,6 @@ def add_branch_to_case(saw, branch_fields_list, branch_value_list):
 
     >>> add_branch_to_case(
     ...     saw,
-    ...     BRANCH_KEY_AND_REQUIRED_FIELDS,
     ...     [1001, 1002, "1", 0.01, 0.10, 100, 100, 100]
     ... )
 
@@ -83,8 +97,14 @@ def add_branch_to_case(saw, branch_fields_list, branch_value_list):
     ...     100, 100, 100,
     ...     0.02, 0.00
     ... ]
-    >>> add_branch_to_case(saw, fields, values)
+    >>> add_branch_to_case(
+    ...     saw,
+    ...     values,
+    ...     fields
+    ... )
     """
+    if len(branch_fields_list) != len(branch_value_list):
+        raise ValueError(f"Received {len(branch_fields_list)} fields but "f"{len(branch_value_list)} values.")
     # Convert branch fields list so they are acceptable for PowerWorld script commands
     updated_branch_fields = "[" + ", ".join(f'"{item}"' for item in branch_fields_list) + "]"
     saw.RunScriptCommand("EnterMode(EDIT);")  # Set to edit mode

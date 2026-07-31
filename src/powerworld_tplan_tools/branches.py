@@ -1,4 +1,9 @@
 from math import pi, sin, cos, atan2, sqrt
+import pandas as pd
+import numpy as np
+from importlib.resources import files
+
+
 
 # VARIABLES
 _ctg_element_branch_fields = ["BusNum", "BusNum:1", "LineCircuit", "BusName", "BusName:1", "LineXfmr"]
@@ -6,6 +11,22 @@ _ctg_element_field_list = ["CTGLabel", "Object", "Action", "FilterName", "TimeDe
 _updated_ctg_fields = "[" + ", ".join(f'"{item}"' for item in _ctg_element_field_list) + "]"
 _overload_violation_fields = ["LimViolLimit", "LimViolValue"]
 BRANCH_KEY_AND_REQUIRED_FIELDS = ["BusNum", "BusNum:1", "LineCircuit", "LineR", "LineX", "LineAMVA", "LineAMVA:1", "LineAMVA:2"]
+
+# Get branch stats
+# Read in branch stats and create voltage branch stat dictionary
+def load_branch_stats():
+    branch_stats_file_path = files("powerworld_tplan_tools.data").joinpath("branch_stats.csv")
+    df = pd.read_csv(branch_stats_file_path)
+    column_names = df.columns.tolist()
+    branch_stat_list_of_lists = [df[column_names[i]].tolist() for i in range(len(column_names))]
+    # Iterate through each voltage level, create list of all stats for the voltage level
+    branchstats = {}  # keys: voltage as a float, values are a list of  branch stats
+    for i in range(len(branch_stat_list_of_lists[0])):
+        voltage = float(branch_stat_list_of_lists[0][i])
+        stat_list = [branch_stat_list_of_lists[stat_number][i] for stat_number in range(len(branch_stat_list_of_lists))]
+        branchstats[voltage] = stat_list
+    return branchstats
+_branchstats = load_branch_stats()
 
 
 
@@ -362,6 +383,336 @@ def calc_haversine_distance(long1, lat1, long2, lat2, earth_radius_km = 6371):
     distance_km = earth_radius_km * c
     return distance_km / 1.609
 
+# Candidate branch class
+class Candidate:
+    def __init__(self, fbus_list, tbus_list, circuit_id, fixed_cost_multiplier, kv=None):
+        self.fbus_num = fbus_list[0]
+        self.fbus_nom_kv = fbus_list[1]
+        self.fbus_sub_num = fbus_list[2]
+
+        self.tbus_num = tbus_list[0]
+        self.tbus_nom_kv = tbus_list[1]
+        self.tbus_sub_num = tbus_list[2]
+
+        self.branches = None
+        if kv is None:
+            self.kv = self.fbus_num
+            self.category = f"{int(self.kv)}_line" if self.kv == self.tbus_nom_kv  else "transformer"
+        else:
+            self.kv = kv
+            self.category = "Line"
+        self.su1 = self.fbus_sub_num
+        self.su2 = self.tbus_sub_num
+
+        self.id = circuit_id
+        self.fixed_cost_multiplier = fixed_cost_multiplier
+
+    def set_selection(self):
+        if self.s2 > 80 and self.row_dist < 10:
+            # self.select = True
+            self.select = 1
+        else:
+            # self.select = False
+            self.select = 0
+        # self.sensitivities = [0,0]
+
+    def branch_parameters(self, dist, kv=None):
+        c = self
+        c.row_dist = float(dist)
+        is_xf = c.fbus_nom_kv != c.tbus_nom_kv
+        if kv is None:
+            kv = max(c.fbus_nom_kv, c.tbus_nom_kv)
+        else:
+            is_xf = False
+        stats = _branchstats[kv]
+
+        if is_xf:
+            xmean, xmin, xmax, xrmean, xrmin, xrmax, smean, smin, smax = \
+                stats[14], stats[13], stats[15], \
+                    stats[17], stats[16], stats[18], \
+                    stats[11], stats[10], stats[12]
+            xsd = min(xmax - xmean, xmean - xmin) / 3.0
+            x = max(xmin, min(xmax, np.random.normal(xmean, xsd)))
+            xrsd = min(xrmax - xrmean, xrmean - xrmin) / 3.0
+            r = x / max(xrmin, min(xrmax, np.random.normal(xrmean, xrsd)))
+            s1 = np.random.triangular(smin, (smean + smin) / 2, smean)
+            sleft, sright = max(smin, 2 * smean - smax), min(smax, 2 * smean - smin)
+            s2 = np.random.triangular(sleft, smean, sright)
+            s3 = np.random.triangular(smean, (smean + smax) / 2, smax)
+            s1, s2, s3 = sorted([s1, s2, s3])
+            c.x, c.r, c.b, c.s1, c.s2, c.s3 = round(x, 6), round(r, 5), 0, round(s1, 1), round(s2, 1), round(s3, 1)
+        else:
+            xmean, xmin, xmax, xrmean, xrmin, xrmax, smean, smin, smax = stats[5], stats[4], stats[6], stats[8], stats[7], stats[9], stats[2], stats[1], stats[3]
+            xsd = min(xmax - xmean, xmean - xmin) / 3.0
+            xdist = max(xmin, min(xmax, np.random.normal(xmean, xsd)))
+            if dist < 10:  # Note: Distances are in MILES
+                c.row_dist = 0.2 + dist * max(1.02, np.random.normal(1.3, 0.1))
+            else:
+                c.row_dist = dist * max(1.02, np.random.normal(1.12, 0.03))
+            c.row_dist = round(c.row_dist, 2)
+            x = xdist * c.row_dist
+            vprop = np.random.triangular(0.95, 0.97, 0.98) * 299792.458  # Km/sec
+            b = np.power(dist * 1.609334 * 2 * np.pi * 60 / vprop, 2) / x
+            xrsd = min(xrmax - xrmean, xrmean - xrmin) / 3.0
+            r = x / max(xrmin, min(xrmax, np.random.normal(xrmean, xrsd)))
+            s1 = np.random.triangular(smin, (smean + smin) / 2, smean)
+            sleft, sright = max(smin, 2 * smean - smax), min(smax, 2 * smean - smin)
+            s2 = np.random.triangular(sleft, smean, sright)
+            s3 = np.random.triangular(smean, (smean + smax) / 2, smax)
+            s1, s2, s3 = sorted([s1, s2, s3])
+            c.x, c.r, c.b, c.s1, c.s2, c.s3 = round(x, 6), round(r, 5), round(b, 5), round(s1, 1), round(s2,1), round(s3, 1)
+
+        c.set_selection()
+
+        # Calculate fixed cost
+        c.fixed_cost = float(dist) * self.fixed_cost_multiplier
+
+# Function to generate new candidate lines
+def create_candidates(candidate_tuple_nums, bus_num_vals_dict, existing_branch_tuples, fixed_cost_multiplier = 1.25):
+    """
+    Generate candidate transmission lines between bus pairs.
+
+    This function creates Candidate objects for a collection of
+    candidate bus pairs. For each candidate pair, geographic distance
+    is calculated using the Haversine formula and branch electrical
+    parameters are estimated using voltage-dependent statistical
+    distributions contained in the package's branch statistics data.
+
+    Candidate circuit identifiers are assigned automatically using the
+    format ``C1``, ``C2``, ``C3``, and so on. If candidate circuit
+    identifiers already exist between a given bus pair, the next
+    available candidate identifier is assigned.
+
+    Parameters
+    ----------
+    candidate_tuple_nums : list[tuple[int, int]]
+        List of candidate bus pairs.
+
+        Each tuple contains:
+
+        - From-bus number.
+        - To-bus number.
+
+        Example::
+
+            [
+                (1, 5),
+                (1, 22),
+                (35, 37)
+            ]
+
+    bus_num_vals_dict : dict
+        Dictionary containing bus information keyed by bus number.
+
+        Each bus entry must contain the following keys:
+
+        - ``"nom_kv"``: Nominal bus voltage in kV.
+        - ``"sub_long"``: Substation longitude in decimal degrees.
+        - ``"sub_lat"``: Substation latitude in decimal degrees.
+        - ``"sub_num"``: PowerWorld substation number.
+
+        Example::
+
+            {
+                1: {
+                    "nom_kv": 138.0,
+                    "sub_long": -157.85,
+                    "sub_lat": 21.31,
+                    "sub_num": 1
+                },
+                2: {
+                    "nom_kv": 138.0,
+                    "sub_long": -157.90,
+                    "sub_lat": 21.28,
+                    "sub_num": 2
+                }
+            }
+
+    existing_branch_tuples : list[tuple[int, int, str]]
+        List of existing branches in the case.
+
+        Each tuple must be in the format::
+
+            (
+                from_bus_num,
+                to_bus_num,
+                circuit_id
+            )
+
+        This information is used to determine the proper candidate
+        circuit identifier for each generated candidate.
+
+        Example::
+
+            [
+                (1, 2, "1"),
+                (1, 2, "2"),
+                (5, 7, "C1")
+            ]
+
+    fixed_cost_multiplier : float, default=1.25
+        Multiplier used when estimating candidate fixed costs.
+
+        Fixed cost is calculated as::
+
+            fixed_cost = distance * fixed_cost_multiplier
+
+        where distance is the great-circle geographic distance
+        between the endpoint substations in miles.
+
+    Returns
+    -------
+    list[Candidate]
+        List of generated Candidate objects.
+
+        Each Candidate object contains:
+
+        - From-bus information.
+        - To-bus information.
+        - Circuit identifier.
+        - Series resistance.
+        - Series reactance.
+        - Charging susceptance.
+        - Thermal ratings.
+        - Estimated fixed cost.
+        - Geographic distance information.
+
+    Notes
+    -----
+    - Geographic distances are calculated using
+      ``calc_haversine_distance()``.
+    - Electrical parameters are randomly sampled from statistical
+      distributions derived from existing transmission and transformer
+      data for the corresponding voltage level.
+    - Candidate circuit identifiers are automatically assigned using
+      the format ``C1``, ``C2``, ``C3``, etc.
+    - Candidates whose calculated resistance or susceptance are
+      effectively zero are excluded from the returned list.
+    - Branch statistics are loaded automatically from the package's
+      bundled ``branch_stats.csv`` file.
+
+    Examples
+    --------
+    Generate candidate lines for all bus pairs in a PowerWorld case:
+
+    >>> from esa import SAW
+    >>> from itertools import combinations
+    >>> import powerworld_tplan_tools as pwt
+    >>>
+    >>> case_path = r"C:\\Cases\\case.pwb"
+    >>> saw = SAW(case_path)
+    >>>
+    >>> branch_fields = saw.get_key_field_list("Branch")
+    >>> df_branch = saw.GetParametersMultipleElement(
+    ...     "Branch",
+    ...     branch_fields
+    ... )
+    >>>
+    >>> existing_branch_tuples = [
+    ...     (
+    ...         df_branch["BusNum"][i],
+    ...         df_branch["BusNum:1"][i],
+    ...         df_branch["LineCircuit"][i].replace(" ", "")
+    ...     )
+    ...     for i in range(len(df_branch))
+    ... ]
+    >>>
+    >>> bus_fields = (
+    ...     saw.get_key_field_list("Bus")
+    ...     + [
+    ...         "BusNomVolt",
+    ...         "Latitude:1",
+    ...         "Longitude:1",
+    ...         "SubNum"
+    ...     ]
+    ... )
+    >>>
+    >>> df_bus = saw.GetParametersMultipleElement(
+    ...     "Bus",
+    ...     bus_fields
+    ... )
+    >>>
+    >>> bus_nums = df_bus["BusNum"].tolist()
+    >>>
+    >>> candidate_tuple_nums = list(
+    ...     combinations(bus_nums, 2)
+    ... )
+    >>>
+    >>> bus_num_vals_dict = {
+    ...     bus_nums{
+    ...         "nom_kv": df_bus["BusNomVolt"][i],
+    ...         "sub_long": df_bus["Longitude:1"][i],
+    ...         "sub_lat": df_bus["Latitude:1"][i],
+    ...         "sub_num": df_bus["SubNum"][i]
+    ...     }
+    ...     for i in range(len(bus_nums))
+    ... }
+    >>>
+    >>> candidates = pwt.create_candidates(
+    ...     candidate_tuple_nums,
+    ...     bus_num_vals_dict,
+    ...     existing_branch_tuples
+    ... )
+
+    Example of accessing candidate information:
+
+    >>> c = candidates[0]
+    >>> c.fbus_num
+    1
+    >>> c.tbus_num
+    5
+    >>> c.id
+    'C1'
+    >>> c.fixed_cost
+    12.7
+    """
+    # Create candidate pair circuit ID dict
+    bus_pair_cand_circuit_id_list_dict = {}
+    for from_bus_num, to_bus_num, circuit_id in existing_branch_tuples:
+        bus_num_pair = (from_bus_num, to_bus_num)
+        if circuit_id.startswith("C"):
+            if bus_num_pair not in bus_pair_cand_circuit_id_list_dict.keys():
+                bus_pair_cand_circuit_id_list_dict[bus_num_pair] = [int(circuit_id[1:])]
+            else:
+                bus_pair_cand_circuit_id_list_dict[bus_num_pair].append(int(circuit_id[1:]))
+
+    # Create "empty" candidate lines. Then, calculate their parameters
+    candidates_list = []
+    for fbus_num, tbus_num in candidate_tuple_nums:
+        fbus_val_dict = bus_num_vals_dict[fbus_num]
+        tbus_val_dict = bus_num_vals_dict[tbus_num]
+
+        # From bus values
+        fbus_nom_kv = fbus_val_dict["nom_kv"]
+        fbus_long = fbus_val_dict["sub_long"]
+        fbus_lat = fbus_val_dict["sub_lat"]
+        fbus_sub_num = fbus_val_dict["sub_num"]
+
+        # To bus values
+        tbus_nom_kv = tbus_val_dict["nom_kv"]
+        tbus_long = tbus_val_dict["sub_long"]
+        tbus_lat = tbus_val_dict["sub_lat"]
+        tbus_sub_num = tbus_val_dict["sub_num"]
+
+        # Create lists
+        fbus_list = [fbus_num, fbus_nom_kv, fbus_sub_num]
+        tbus_list = [tbus_num, tbus_nom_kv, tbus_sub_num]
+
+        # Get circuit ID
+        if (fbus_num, tbus_num) in bus_pair_cand_circuit_id_list_dict:
+            max_ckt_num = max(bus_pair_cand_circuit_id_list_dict[(fbus_num, tbus_num)])
+            circuit_id = f"C{max_ckt_num + 1}"
+        else:
+            circuit_id = "C1"
+
+        # Create candidate
+        c = Candidate(fbus_list, tbus_list, circuit_id, fixed_cost_multiplier)
+        c.branch_parameters(calc_haversine_distance(fbus_long, fbus_lat, tbus_long, tbus_lat))
+
+        if c.b > 1e-6 and c.r > 1e-8:  # make sure b isn't zero
+            candidates_list.append(c)
+
+    return candidates_list
 
 
 
